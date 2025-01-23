@@ -1,0 +1,255 @@
+// header file for melody note names
+#include "pitches.h"
+
+// notes in the melody:
+int melody[] = {
+  NOTE_C4, NOTE_G3, NOTE_G3, NOTE_A3, NOTE_G3, 0, NOTE_B3, NOTE_C4
+};
+
+// note durations: 4 = quarter note, 8 = eighth note, etc.:
+int noteDurations[] = {
+  4, 8, 8, 4, 4, 4, 4, 4
+};
+
+// sensor analog values & ESP pin assignments
+int AnalogValue[5] = {0,0,0,0,0};
+int AnalogPin[5] = {4,5,6,7,15};
+
+// left motor pin assignments
+int motor1PWM = 37;
+int motor1Phase = 38;
+
+// right motor pin assignments
+int motor2PWM = 39;
+int motor2Phase = 40;
+
+// distance sensor analog value & pin assignment 
+int distancePin = 16;
+int distanceValue = 0;
+
+// motor speed variables
+int speed_left = 175;
+int speed_right = 175;
+
+// check for count of distance sensor readings
+int targetCount = 5;
+int consecCount = 0;
+
+// car goes forward in straight line
+void straight() {
+    speed_left = 175;
+    speed_right = 175;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// car performs 180 degree turn in place
+void reverse() {
+    analogWrite(motor2Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(550);
+    analogWrite(motor2Phase, 255);
+}
+
+// car stops in place
+void stop() {
+    speed_left = 0;
+    speed_right = 0;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// car turns 90 degrees right in place
+void rightTurn() {
+    straight(); // stops car turning too early
+    delay(200);
+
+    stop(); // stop for set time
+    delay(250);
+
+    // rotate mobot 90 degrees right
+    analogWrite(motor1Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(275);
+    analogWrite(motor1Phase, 255);
+
+    // check when middle sensor returns to path
+    if(AnalogValue[2] < 500) {
+        // drive straight
+        straight();
+        delay(125);
+    }
+}
+
+// car turns 90 degrees left in place
+void leftTurn() {
+    straight(); // stops car turning too early
+    delay(200);
+
+    stop(); // stop for set time
+    delay(250);
+
+    // rotate mobot 90 degrees left
+    analogWrite(motor2Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(275);
+    analogWrite(motor2Phase, 255);
+
+    // check when middle sensor returns to path
+    if(AnalogValue[2] < 500) {
+        // drive straight
+        straight();
+        delay(125);
+    }
+}
+
+// adjust each motor speed to turn left when inside sensor detects black
+void leftInsideSensorCorrection() {
+    speed_left = 175;
+    speed_right = 125;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn right when inside sensor detects black
+void rightInsideSensorCorrection() {
+    speed_left = 125;
+    speed_right = 175;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn left when outside sensor detects black
+void leftOutsideSensorCorrection() {
+    speed_left = 255;
+    speed_right = 50;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn right when outside sensor detects black
+void rightOutsideSensorCorrection() {
+    speed_left = 50;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// play a melody using the piezo buzzer
+void playMelody() {
+    // iterate over the notes of the melody:
+    for (int thisNote = 0; thisNote < 8; thisNote++) {
+
+        // to calculate the note duration, take one second divided by the note type.
+        //e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc.
+        int noteDuration = 1000 / noteDurations[thisNote];
+        tone(8, melody[thisNote], noteDuration);
+
+        // to distinguish the notes, set a minimum time between them.
+        // the note's duration + 30% seems to work well:
+        int pauseBetweenNotes = noteDuration * 1.30;
+        delay(pauseBetweenNotes);
+        // stop the tone playing:
+        noTone(8);
+    } 
+}
+
+// setup code executes once upon running the code
+void setup() {
+  Serial.begin(9600);
+
+  // set motor turn directions to move forwards
+  analogWrite(motor1Phase, 255);
+  analogWrite(motor2Phase, 255);
+
+  // stop motors upon startup
+  analogWrite(motor1PWM, 0);
+  analogWrite(motor2PWM, 0);
+}
+
+// loop function executes repeatedly
+void loop() {
+    // cycle through sensor values for alignment detection
+    int i;
+    for (i=0;i<5;i++)
+    {
+        AnalogValue[i]=analogRead(AnalogPin[i]);
+    
+        /*Serial.print(AnalogValue[i]); // This prints the actual analog reading from the sensors
+        Serial.print("\t"); //tab over on screen
+        if(i==4)
+        {
+            Serial.println(""); //carriage return
+            delay(600); // display new set of readings every 600mS
+        }*/
+    }
+
+    // reset speed to default if inside & outside sensors are on black
+    if(AnalogValue[0] > 500 && AnalogValue[1] > 500 && AnalogValue[3] > 500 && AnalogValue[4] > 500 && AnalogValue[2] < 500) {
+      straight();
+    }
+
+    // when all sensors are on white
+    if(AnalogValue[0] < 500 && AnalogValue[1] < 500 && AnalogValue[3] < 500 && AnalogValue[4] < 500 && AnalogValue[2] < 500) {
+        stop();
+        playMelody();
+        straight();
+        delay(100);
+    }
+
+    // inside sensors speed change
+    if(AnalogValue[1] < 500)
+    {
+        leftInsideSensorCorrection();
+    }
+    if(AnalogValue[3] < 500)
+    {
+        rightInsideSensorCorrection();
+    }
+
+    // outside sensors speed change
+    if(AnalogValue[0] < 500)
+    {
+        leftOutsideSensorCorrection();
+    }
+    if(AnalogValue[4] < 500)
+    {
+        rightOutsideSensorCorrection();
+    }
+
+    // read analog values of distance sensor
+    distanceValue = analogRead(distancePin);
+
+    // increase count when mobot close to obstruction/wall
+    if(distanceValue > 1750) {
+        consecCount++;
+    }
+    // if consecutive readings aren't high enough reset count
+    else {
+        consecCount = 0;
+    }
+
+    // when targetCount number of consecutive readings are high
+    if(consecCount == targetCount) {
+      stop();
+      delay(250);
+
+      // turn 180 degrees
+      reverse();
+
+      // when sensor returns to path
+      if(AnalogValue[2] < 500) {
+          straight();
+          delay(125);
+      }
+    }    
+}
