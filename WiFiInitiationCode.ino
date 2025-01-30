@@ -1,7 +1,7 @@
 #include <WiFi.h>
 // wi-fi details
 char ssid[] = "iot";
-char password[] = "militarists72disapproval";
+char password[] = "anklet29serpentwood";  //anklet29serpentwood (io48), militarists72disapproval (io38)
 WiFiClient client;
 // read buffer size for HTTP response
 #define BUFSIZE 512
@@ -63,7 +63,8 @@ String getResponseBody(String& response) {
   response.substring(split+4,
   response.length());
   body.trim();
-  Serial.print(body);
+  Serial.print("The desired position is: ");
+  Serial.println(body);
   return body;
 }
 
@@ -98,19 +99,27 @@ void loop(){
     String body =
   getResponseBody(response);
   // check if at final destination
-    if (!body.equals("Finished")) {
+    if (body.equals("Finished")) {
       destination = body.toInt();
+      while(true);
+    }
+    else{
+      int newPosition = body.toInt();
+      if (newPosition > 0){
+        position = newPosition;
+      }
+      else{
+        Serial.println("Invalid position");
+      }
     }
   }
   delay(1000);
 
+  Serial.print("The response is: ");
   Serial.println(response);
-  Serial.println(position);
+ // Serial.print("The current(?) position is: ");
+ // Serial.println(position);
+  Serial.print("The postbody is: ");
   Serial.println(postBody);
-  position++;
-
-  if(position > 5){
-    while(true);
-  }
-
+  //position++;
 }
