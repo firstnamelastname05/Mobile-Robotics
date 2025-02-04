@@ -1,17 +1,4 @@
-// header file for melody note names
-#include "pitches.h"
-
-#define V 8 // Number of vertices in the graph
-
-// notes in the melody:
-int melody[] = {
-  NOTE_C4, NOTE_G3
-};
-
-// note durations: 4 = quarter note, 8 = eighth note, etc.:
-int noteDurations[] = {
-  4, 4
-};
+#define V 8 // define number of checkpoints on the map
 
 // sensor analog values & ESP pin assignments
 int AnalogValue[5] = {0,0,0,0,0};
@@ -37,17 +24,21 @@ int speed_right = 175;
 int targetCount = 5;
 int consecCount = 0;
 
-// Define a specific route
+// define a specific route
 int route[] = {0, 3, 6, 0, 2, 3};
+// get route array length
 int routeLength = sizeof(route) / sizeof(route[0]);
 
+// array of no. of checkpoints to skip between checkpoints in route array
 int skippedCount[5];
 
+// variable for iterating through skippedCount array
 int ii = 0;
 
+// set line following sensors threshold value
 int thresholdLS = 750;
 
-// A utility function to find the vertex with minimum distance value
+// function to find the checkpoint with minimum distance value
 int minDistance(int dist[], bool sptSet[]) {
   int min = INT_MAX, min_index;
   for (int v = 0; v < V; v++) {
@@ -59,59 +50,46 @@ int minDistance(int dist[], bool sptSet[]) {
   return min_index;
 }
 
-// A utility function to extract the shortest path from source to a destination
+// function to extract the shortest path from source to a destination
 void extractPath(int parent[], int dest, int path[], int &pathIndex) {
   if (dest == -1) return;
   extractPath(parent, parent[dest], path, pathIndex);
   path[pathIndex++] = dest;
 }
 
-// Function to print the number of checkpoints skipped
-/*void printSkippedCheckpointCount(int path[], int pathLength, int src, int dest) {
-  Serial.print("From ");
-  Serial.print(src);
-  Serial.print(" to ");
-  Serial.print(dest);
-  Serial.print(" -> Number of skipped checkpoints: ");
-
-  // Count intermediate checkpoints (exclude source and destination)
-  skippedCount = (pathLength > 2) ? (pathLength - 2) : 0;
-  Serial.println(skippedCount);
-}*/
-
-// Dijkstra's algorithm to find the shortest path from `src`
+// dijkstra's algorithm to find the shortest path from source
 void dijkstra(int graph[V][V], int src, int parent[], int dist[]) {
-  bool sptSet[V]; // sptSet[i] will be true if vertex i is included in shortest path tree
+  bool sptSet[V]; // sptSet[i] will be true if checkpoint i is included in shortest path tree
 
-  // Initialize all distances as INFINITE and sptSet[] as false
+  // initialize all distances as INFINITE and sptSet[] as false
   for (int i = 0; i < V; i++) {
     dist[i] = INT_MAX;
     sptSet[i] = false;
-    parent[i] = -1; // No parent initially
+    parent[i] = -1; // no parent initially
   }
 
-  // Distance of source vertex from itself is always 0
+  // distance of source checkpoint from itself is always 0
   dist[src] = 0;
 
-  // Find shortest path for all vertices
+  // find shortest path for all checkpoints
   for (int count = 0; count < V - 1; count++) {
-    // Pick the minimum distance vertex from the set of vertices not yet processed
+    // pick the minimum distance checkpoint from the set of checkpoints not yet processed
     int u = minDistance(dist, sptSet);
 
-    // Mark the picked vertex as processed
+    // mark the picked checkpoint as processed
     sptSet[u] = true;
 
-    // Update dist value of the adjacent vertices of the picked vertex
+    // update dist value of the adjacent checkpoints of the picked checkpoint
     for (int v = 0; v < V; v++) {
       if (!sptSet[v] && graph[u][v] && dist[u] != INT_MAX && dist[u] + graph[u][v] < dist[v]) {
         dist[v] = dist[u] + graph[u][v];
-        parent[v] = u; // Set parent
+        parent[v] = u; // set parent
       }
     }
   }
 }
 
-// Process the given route and determine the number of checkpoints skipped for each segment
+// process the given route and determine the number of checkpoints skipped for each segment
 void processRoute(int graph[V][V], int route[], int routeLength) {
   int dist[V], parent[V];
   int path[V];
@@ -121,20 +99,19 @@ void processRoute(int graph[V][V], int route[], int routeLength) {
     int src = route[i];
     int dest = route[i + 1];
 
-    // Run Dijkstra's algorithm from the current source
+    // run dijkstra's algorithm from the current source
     dijkstra(graph, src, parent, dist);
 
-    // Extract the shortest path from source to destination
+    // extract the shortest path from source to destination
     pathIndex = 0;
     extractPath(parent, dest, path, pathIndex);
 
-    // Print the number of skipped checkpoints
-    //printSkippedCheckpointCount(path, pathIndex, src, dest);
+    // add number of checkpoints to skip to skippedCount array
     skippedCount[i] = (pathIndex > 2) ? (pathIndex - 2) : 0;
   }
 }
 
-// The graph (adjacency matrix)
+// set distances between checkpoints on the map
 int graph[V][V] = {
   {0, 0, 0, 0, 8, 0, 0, 7},
   {0, 0, 0, 0, 0, 0, 2, 5},
@@ -255,25 +232,6 @@ void rightOutsideSensorCorrection() {
     analogWrite(motor2PWM, speed_right);
 }
 
-// play a melody using the piezo buzzer
-void playMelody() {
-    // iterate over the notes of the melody:
-    for (int thisNote = 0; thisNote < 2; thisNote++) {
-
-        // to calculate the note duration, take one second divided by the note type.
-        //e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc.
-        int noteDuration = 1000 / noteDurations[thisNote];
-        tone(8, melody[thisNote], noteDuration);
-
-        // to distinguish the notes, set a minimum time between them.
-        // the note's duration + 30% seems to work well:
-        int pauseBetweenNotes = noteDuration * 1.30;
-        delay(pauseBetweenNotes);
-        // stop the tone playing:
-        noTone(8);
-    } 
-}
-
 // setup code executes once upon running the code
 void setup() {
   Serial.begin(9600);
@@ -286,10 +244,10 @@ void setup() {
   analogWrite(motor1PWM, 0);
   analogWrite(motor2PWM, 0);
 
-  processRoute(graph, route, routeLength);
+  /*processRoute(graph, route, routeLength);
   for (int x = 0; x < routeLength - 1; x++) {
       Serial.println(skippedCount[x]);
-  }
+  }*/
 }
 
 // loop function executes repeatedly
@@ -314,8 +272,9 @@ void loop() {
       straight();
     }
 
-    // when all sensors are on white
+    // when all / any 4 sensors are on white
     if(AnalogValue[0] < thresholdLS && AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[4] < thresholdLS && AnalogValue[2] < thresholdLS || AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[4] < thresholdLS && AnalogValue[2] < thresholdLS || AnalogValue[0] < thresholdLS && AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[2] < thresholdLS) {
+        // if no checkpoints are to be skipped before desired checkpoint
         if (skippedCount[ii] == 0) {
           stop();
           delay(1000);
@@ -328,13 +287,14 @@ void loop() {
             ii = 0;
           }
 
-          delay(200);
+          delay(250);
         }
 
+        // if skipping a checkpoint
         else {
           skippedCount[ii]--;
           straight();
-          //delay(500);
+          delay(250);
         }
     }
 
