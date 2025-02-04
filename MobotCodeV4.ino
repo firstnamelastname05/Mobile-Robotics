@@ -1,0 +1,374 @@
+// header file for melody note names
+#include "pitches.h"
+
+#define V 8 // Number of vertices in the graph
+
+// notes in the melody:
+int melody[] = {
+  NOTE_C4, NOTE_G3
+};
+
+// note durations: 4 = quarter note, 8 = eighth note, etc.:
+int noteDurations[] = {
+  4, 4
+};
+
+// sensor analog values & ESP pin assignments
+int AnalogValue[5] = {0,0,0,0,0};
+int AnalogPin[5] = {4,5,6,7,15};
+
+// left motor pin assignments
+int motor1PWM = 37;
+int motor1Phase = 38;
+
+// right motor pin assignments
+int motor2PWM = 39;
+int motor2Phase = 40;
+
+// distance sensor analog value & pin assignment 
+int distancePin = 16;
+int distanceValue = 0;
+
+// motor speed variables
+int speed_left = 175;
+int speed_right = 175;
+
+// check for count of distance sensor readings
+int targetCount = 5;
+int consecCount = 0;
+
+int skippedCount = 0;
+
+// Define a specific route
+int route[] = {0, 2, 3, 0, 3};
+int routeLength = sizeof(route) / sizeof(route[0]);
+int arr = 0;
+
+// A utility function to find the vertex with minimum distance value
+int minDistance(int dist[], bool sptSet[]) {
+  int min = INT_MAX, min_index;
+  for (int v = 0; v < V; v++) {
+    if (!sptSet[v] && dist[v] <= min) {
+      min = dist[v];
+      min_index = v;
+    }
+  }
+  return min_index;
+}
+
+// A utility function to extract the shortest path from source to a destination
+void extractPath(int parent[], int dest, int path[], int &pathIndex) {
+  if (dest == -1) return;
+  extractPath(parent, parent[dest], path, pathIndex);
+  path[pathIndex++] = dest;
+}
+
+// Function to print the number of checkpoints skipped
+int printSkippedCheckpointCount(int path[], int pathLength, int src, int dest) {
+  Serial.print("From ");
+  Serial.print(src);
+  Serial.print(" to ");
+  Serial.print(dest);
+  Serial.print(" -> Number of skipped checkpoints: ");
+
+  // Count intermediate checkpoints (exclude source and destination)
+  int skippedCount = (pathLength > 2) ? (pathLength - 2) : 0;
+  Serial.println(skippedCount);
+  return skippedCount;
+}
+
+// Dijkstra's algorithm to find the shortest path from `src`
+void dijkstra(int graph[V][V], int src, int parent[], int dist[]) {
+  bool sptSet[V]; // sptSet[i] will be true if vertex i is included in shortest path tree
+
+  // Initialize all distances as INFINITE and sptSet[] as false
+  for (int i = 0; i < V; i++) {
+    dist[i] = INT_MAX;
+    sptSet[i] = false;
+    parent[i] = -1; // No parent initially
+  }
+
+  // Distance of source vertex from itself is always 0
+  dist[src] = 0;
+
+  // Find shortest path for all vertices
+  for (int count = 0; count < V - 1; count++) {
+    // Pick the minimum distance vertex from the set of vertices not yet processed
+    int u = minDistance(dist, sptSet);
+
+    // Mark the picked vertex as processed
+    sptSet[u] = true;
+
+    // Update dist value of the adjacent vertices of the picked vertex
+    for (int v = 0; v < V; v++) {
+      if (!sptSet[v] && graph[u][v] && dist[u] != INT_MAX && dist[u] + graph[u][v] < dist[v]) {
+        dist[v] = dist[u] + graph[u][v];
+        parent[v] = u; // Set parent
+      }
+    }
+  }
+}
+
+// Process the given route and determine the number of checkpoints skipped for each segment
+int processRoute(int graph[V][V], int route[], int routeLength, int i) {
+  int dist[V], parent[V];
+  int path[V];
+  int pathIndex;
+
+  //for (int i = 0; i < routeLength - 1; i++) {
+  int src = route[i];
+  int dest = route[i + 1];
+
+  // Run Dijkstra's algorithm from the current source
+  dijkstra(graph, src, parent, dist);
+
+  // Extract the shortest path from source to destination
+  pathIndex = 0;
+  extractPath(parent, dest, path, pathIndex);
+
+  // Print the number of skipped checkpoints
+  return printSkippedCheckpointCount(path, pathIndex, src, dest);
+  //}
+}
+
+// The graph (adjacency matrix)
+int graph[V][V] = {
+  {0, 0, 0, 0, 8, 0, 0, 7},
+  {0, 0, 0, 0, 0, 0, 2, 5},
+  {0, 0, 0, 8, 0, 0, 0, 7},
+  {0, 0, 8, 0, 0, 0, 10, 0},
+  {8, 0, 0, 0, 0, 0, 10, 0},
+  {0, 0, 0, 0, 0, 0, 10, 0},
+  {0, 2, 0, 10, 10, 10, 0, 0},
+  {7, 5, 7, 0, 0, 0, 0, 0},
+};
+
+// car goes forward in straight line
+void straight() {
+    speed_left = 175;
+    speed_right = 175;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// car performs 180 degree turn in place
+void reverse() {
+    analogWrite(motor2Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(550);
+    analogWrite(motor2Phase, 255);
+}
+
+// car stops in place
+void stop() {
+    speed_left = 0;
+    speed_right = 0;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// car turns 90 degrees right in place
+void rightTurn() {
+    straight(); // stops car turning too early
+    delay(200);
+
+    stop(); // stop for set time
+    delay(250);
+
+    // rotate mobot 90 degrees right
+    analogWrite(motor1Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(275);
+    analogWrite(motor1Phase, 255);
+
+    // check when middle sensor returns to path
+    if(AnalogValue[2] < 500) {
+        // drive straight
+        straight();
+        delay(125);
+    }
+}
+
+// car turns 90 degrees left in place
+void leftTurn() {
+    straight(); // stops car turning too early
+    delay(200);
+
+    stop(); // stop for set time
+    delay(250);
+
+    // rotate mobot 90 degrees left
+    analogWrite(motor2Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(275);
+    analogWrite(motor2Phase, 255);
+
+    // check when middle sensor returns to path
+    if(AnalogValue[2] < 500) {
+        // drive straight
+        straight();
+        delay(125);
+    }
+}
+
+// adjust each motor speed to turn left when inside sensor detects black
+void leftInsideSensorCorrection() {
+    speed_left = 175;
+    speed_right = 125;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn right when inside sensor detects black
+void rightInsideSensorCorrection() {
+    speed_left = 125;
+    speed_right = 175;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn left when outside sensor detects black
+void leftOutsideSensorCorrection() {
+    speed_left = 255;
+    speed_right = 50;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn right when outside sensor detects black
+void rightOutsideSensorCorrection() {
+    speed_left = 50;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// play a melody using the piezo buzzer
+void playMelody() {
+    // iterate over the notes of the melody:
+    for (int thisNote = 0; thisNote < 2; thisNote++) {
+
+        // to calculate the note duration, take one second divided by the note type.
+        //e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc.
+        int noteDuration = 1000 / noteDurations[thisNote];
+        tone(8, melody[thisNote], noteDuration);
+
+        // to distinguish the notes, set a minimum time between them.
+        // the note's duration + 30% seems to work well:
+        int pauseBetweenNotes = noteDuration * 1.30;
+        delay(pauseBetweenNotes);
+        // stop the tone playing:
+        noTone(8);
+    } 
+}
+
+// setup code executes once upon running the code
+void setup() {
+  Serial.begin(9600);
+
+  // set motor turn directions to move forwards
+  analogWrite(motor1Phase, 255);
+  analogWrite(motor2Phase, 255);
+
+  // stop motors upon startup
+  analogWrite(motor1PWM, 0);
+  analogWrite(motor2PWM, 0);
+
+  // Process the route
+  processRoute(graph, route, routeLength, arr);
+}
+
+// loop function executes repeatedly
+void loop() {
+    // cycle through sensor values for alignment detection
+    int i;
+    for (i=0;i<5;i++)
+    {
+        AnalogValue[i]=analogRead(AnalogPin[i]);
+    
+        /*Serial.print(AnalogValue[i]); // This prints the actual analog reading from the sensors
+        Serial.print("\t"); //tab over on screen
+        if(i==4)
+        {
+            Serial.println(""); //carriage return
+            delay(600); // display new set of readings every 600mS
+        }*/
+    }
+
+    // reset speed to default if inside & outside sensors are on black
+    if(AnalogValue[0] > 500 && AnalogValue[1] > 500 && AnalogValue[3] > 500 && AnalogValue[4] > 500 && AnalogValue[2] < 500) {
+      straight();
+    }
+
+    // when all sensors are on white
+    if(AnalogValue[0] < 500 && AnalogValue[1] < 500 && AnalogValue[3] < 500 && AnalogValue[4] < 500 && AnalogValue[2] < 500) {
+        if (skippedCount == 0) {
+          stop();
+          delay(1000);
+          arr++;
+          processRoute(graph, route, routeLength, arr);
+          straight();
+        }
+        else {
+          // Process the route
+          delay(1000);
+          skippedCount--;
+        }
+    }
+
+    // inside sensors speed change
+    if(AnalogValue[1] < 500)
+    {
+        leftInsideSensorCorrection();
+    }
+    if(AnalogValue[3] < 500)
+    {
+        rightInsideSensorCorrection();
+    }
+
+    // outside sensors speed change
+    if(AnalogValue[0] < 500)
+    {
+        leftOutsideSensorCorrection();
+    }
+    if(AnalogValue[4] < 500)
+    {
+        rightOutsideSensorCorrection();
+    }
+
+    // read analog values of distance sensor
+    distanceValue = analogRead(distancePin);
+
+    // increase count when mobot close to obstruction/wall
+    if(distanceValue > 1750) {
+        consecCount++;
+    }
+    // if consecutive readings aren't high enough reset count
+    else {
+        consecCount = 0;
+    }
+
+    // when targetCount number of consecutive readings are high
+    if(consecCount == targetCount) {
+      stop();
+      delay(250);
+
+      // turn 180 degrees
+      reverse();
+
+      // when sensor returns to path
+      if(AnalogValue[2] < 500) {
+          straight();
+          delay(125);
+      }
+    }    
+}
