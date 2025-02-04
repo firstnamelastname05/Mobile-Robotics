@@ -39,6 +39,11 @@ void dijkstra(int graph[V][V], int src, int dist[], int pred[]) {
 
 // Function to count the number of checkpoints between main checkpoints
 int countCheckpoints(int pred[], int start, int end) {
+  // If they are directly connected, there are no intermediate checkpoints
+  if (pred[end] == start) {
+    return 0;
+  }
+
   int count = 0;
   int node = end;
   while (pred[node] != -1 && pred[node] != start) {
@@ -83,3 +88,4 @@ void setup() {
 void loop() {
   // Nothing needed in loop for this implementation
 }
+
