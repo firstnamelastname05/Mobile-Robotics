@@ -40,7 +40,7 @@ int consecCount = 0;
 int skippedCount = 0;
 
 // Define a specific route
-int route[] = {0, 2, 3, 0, 3};
+int route[] = {0, 3, 4, 2};
 int routeLength = sizeof(route) / sizeof(route[0]);
 int arr = 0;
 
@@ -64,7 +64,7 @@ void extractPath(int parent[], int dest, int path[], int &pathIndex) {
 }
 
 // Function to print the number of checkpoints skipped
-int printSkippedCheckpointCount(int path[], int pathLength, int src, int dest) {
+void printSkippedCheckpointCount(int path[], int pathLength, int src, int dest) {
   Serial.print("From ");
   Serial.print(src);
   Serial.print(" to ");
@@ -72,9 +72,9 @@ int printSkippedCheckpointCount(int path[], int pathLength, int src, int dest) {
   Serial.print(" -> Number of skipped checkpoints: ");
 
   // Count intermediate checkpoints (exclude source and destination)
-  int skippedCount = (pathLength > 2) ? (pathLength - 2) : 0;
+  skippedCount = (pathLength > 2) ? (pathLength - 2) : 0;
   Serial.println(skippedCount);
-  return skippedCount;
+  //return skippedCount;
 }
 
 // Dijkstra's algorithm to find the shortest path from `src`
@@ -110,7 +110,7 @@ void dijkstra(int graph[V][V], int src, int parent[], int dist[]) {
 }
 
 // Process the given route and determine the number of checkpoints skipped for each segment
-int processRoute(int graph[V][V], int route[], int routeLength, int i) {
+void processRoute(int graph[V][V], int route[], int routeLength, int i) {
   int dist[V], parent[V];
   int path[V];
   int pathIndex;
@@ -127,7 +127,7 @@ int processRoute(int graph[V][V], int route[], int routeLength, int i) {
   extractPath(parent, dest, path, pathIndex);
 
   // Print the number of skipped checkpoints
-  return printSkippedCheckpointCount(path, pathIndex, src, dest);
+  printSkippedCheckpointCount(path, pathIndex, src, dest);
   //}
 }
 
@@ -304,6 +304,8 @@ void loop() {
         }*/
     }
 
+    Serial.println(skippedCount);
+
     // reset speed to default if inside & outside sensors are on black
     if(AnalogValue[0] > 500 && AnalogValue[1] > 500 && AnalogValue[3] > 500 && AnalogValue[4] > 500 && AnalogValue[2] < 500) {
       straight();
@@ -313,15 +315,22 @@ void loop() {
     if(AnalogValue[0] < 500 && AnalogValue[1] < 500 && AnalogValue[3] < 500 && AnalogValue[4] < 500 && AnalogValue[2] < 500) {
         if (skippedCount == 0) {
           stop();
-          delay(1000);
-          arr++;
+          if (arr < routeLength) {
+            arr++;
+          }
+          /*else {
+            stop();
+            while(true);
+          }*/
           processRoute(graph, route, routeLength, arr);
+          delay(1000);
           straight();
         }
         else {
           // Process the route
-          delay(1000);
           skippedCount--;
+          delay(100);
+          straight();
         }
     }
 
