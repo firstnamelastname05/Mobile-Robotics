@@ -4,7 +4,7 @@
 int minDistance(int dist[], bool sptSet[]) {
   int min = INT_MAX, min_index;
   for (int v = 0; v < V; v++) {
-    if (sptSet[v] == false && dist[v] <= min) {
+    if (!sptSet[v] && dist[v] <= min) {
       min = dist[v];
       min_index = v;
     }
@@ -12,25 +12,35 @@ int minDistance(int dist[], bool sptSet[]) {
   return min_index;
 }
 
-// A utility function to print the constructed distance array
-void printSolution(int dist[]) {
-  Serial.println("Vertex \t Distance from Source");
-  for (int i = 0; i < V; i++) {
-    Serial.print(i);
-    Serial.print(" \t\t\t\t");
-    Serial.println(dist[i]);
-  }
+// A utility function to extract the shortest path from source to a destination
+void extractPath(int parent[], int dest, int path[], int &pathIndex) {
+  if (dest == -1) return;
+  extractPath(parent, parent[dest], path, pathIndex);
+  path[pathIndex++] = dest;
 }
 
-// Function that implements Dijkstra's algorithm for a graph represented using adjacency matrix representation
-void dijkstra(int graph[V][V], int src) {
-  int dist[V];      // The output array. dist[i] will hold the shortest distance from src to i
-  bool sptSet[V];   // sptSet[i] will be true if vertex i is included in shortest path tree
+// Function to print the number of checkpoints skipped
+void printSkippedCheckpointCount(int path[], int pathLength, int src, int dest) {
+  Serial.print("From ");
+  Serial.print(src);
+  Serial.print(" to ");
+  Serial.print(dest);
+  Serial.print(" -> Number of skipped checkpoints: ");
+
+  // Count intermediate checkpoints (exclude source and destination)
+  int skippedCount = (pathLength > 2) ? (pathLength - 2) : 0;
+  Serial.println(skippedCount);
+}
+
+// Dijkstra's algorithm to find the shortest path from `src`
+void dijkstra(int graph[V][V], int src, int parent[], int dist[]) {
+  bool sptSet[V]; // sptSet[i] will be true if vertex i is included in shortest path tree
 
   // Initialize all distances as INFINITE and sptSet[] as false
   for (int i = 0; i < V; i++) {
     dist[i] = INT_MAX;
     sptSet[i] = false;
+    parent[i] = -1; // No parent initially
   }
 
   // Distance of source vertex from itself is always 0
@@ -46,18 +56,37 @@ void dijkstra(int graph[V][V], int src) {
 
     // Update dist value of the adjacent vertices of the picked vertex
     for (int v = 0; v < V; v++) {
-      // Update dist[v] only if v is not in sptSet, there is an edge from u to v, and total weight of path from src to v through u is smaller than current dist[v]
       if (!sptSet[v] && graph[u][v] && dist[u] != INT_MAX && dist[u] + graph[u][v] < dist[v]) {
         dist[v] = dist[u] + graph[u][v];
+        parent[v] = u; // Set parent
       }
     }
   }
-
-  // Print the constructed distance array
-  printSolution(dist);
 }
 
-// The graph initialization (adjacency matrix)
+// Process the given route and determine the number of checkpoints skipped for each segment
+void processRoute(int graph[V][V], int route[], int routeLength) {
+  int dist[V], parent[V];
+  int path[V];
+  int pathIndex;
+
+  for (int i = 0; i < routeLength - 1; i++) {
+    int src = route[i];
+    int dest = route[i + 1];
+
+    // Run Dijkstra's algorithm from the current source
+    dijkstra(graph, src, parent, dist);
+
+    // Extract the shortest path from source to destination
+    pathIndex = 0;
+    extractPath(parent, dest, path, pathIndex);
+
+    // Print the number of skipped checkpoints
+    printSkippedCheckpointCount(path, pathIndex, src, dest);
+  }
+}
+
+// The graph (adjacency matrix)
 int graph[V][V] = {
   {0, 0, 0, 0, 8, 0, 0, 7},
   {0, 0, 0, 0, 0, 0, 2, 5},
@@ -73,8 +102,12 @@ void setup() {
   // Start serial communication at 9600 baud
   Serial.begin(9600);
 
-  // Call dijkstra's algorithm with source vertex 0
-  dijkstra(graph, 0);
+  // Define a specific route
+  int route[] = {0, 2, 3, 0, 3};
+  int routeLength = sizeof(route) / sizeof(route[0]);
+
+  // Process the route
+  processRoute(graph, route, routeLength);
 }
 
 void loop() {
