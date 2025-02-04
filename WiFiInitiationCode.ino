@@ -80,17 +80,37 @@ String getResponseBody(String& response) {
   return body;
 }
 
+void sendGetRequest() {
+  if (!client.connect(server, port)) {
+    Serial.println("Error connecting to server");
+    return;
+  }
+
+  client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
+  client.println("Host: 3.250.38.184");  // Include Host header
+  //client.println("Connection: close");   // Ensure connection closes after response
+  client.println(); // Blank line to end headers
+
+  Serial.println("GET request sent");
+
+  String response = readResponse(); // Read server response
+  Serial.println("Response: " + response);
+}
+
+
 void setup() {
   Serial.begin(9600);
   delay(1000);
   connectToWiFi();
   connect();
-  //client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
+  client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
   analogWrite(motor1PWM, 0);
   analogWrite(motor2PWM, 0);
+  sendGetRequest();
 }
 
 void loop(){
+
   for(int i = 0; i < 5; i++){
     AnalogValue[i]=analogRead(AnalogPin[i]); //Read sensor data
 
