@@ -1,5 +1,15 @@
 #define V 8 // define number of checkpoints on the map
 
+#include <WiFi.h>
+
+// wi-fi details
+char ssid[] = "iot";
+char password[] = "militarists72disapproval";
+WiFiClient client;
+
+// read buffer size for HTTP response
+#define BUFSIZE 512
+
 // sensor analog values & ESP pin assignments
 int AnalogValue[5] = {0,0,0,0,0};
 int AnalogPin[5] = {4,5,6,7,15};
@@ -25,18 +35,127 @@ int targetCount = 5;
 int consecCount = 0;
 
 // define a specific route
-int route[] = {0, 3, 6, 0, 2, 3};
+//int route[] = {0, 3, 1};
 // get route array length
-int routeLength = sizeof(route) / sizeof(route[0]);
+//int routeLength = sizeof(route) / sizeof(route[0]);
 
 // array of no. of checkpoints to skip between checkpoints in route array
-int skippedCount[5];
+int skippedCount[10];
 
 // variable for iterating through skippedCount array
-int ii = 0;
+int skipIndex = 0;
 
 // set line following sensors threshold value
 int thresholdLS = 750;
+
+void connectToWiFi() {
+  Serial.print("Connecting to network: ");
+  Serial.print(ssid);
+  Serial.flush();
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    Serial.flush();
+    delay(300);
+  }
+  Serial.println("Connected");
+  Serial.print("Obtaining IP address");
+  Serial.flush();
+
+  while (WiFi.localIP() == INADDR_NONE) {
+    Serial.print(".");
+    Serial.flush();
+    delay(300);
+  }
+  Serial.println();
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+// server details
+char server[] = "3.250.38.184";
+int port = 8000;
+int position = 0;
+
+bool connect(){
+  if(!client.connect(server, port)){
+    Serial.println("error connecting to server");
+    return false;
+  }
+  return true;
+}
+
+String readResponse() {
+  char buffer[BUFSIZE];
+  memset(buffer, 0, BUFSIZE);
+  client.readBytes(buffer, BUFSIZE);
+  String response(buffer);
+  return response;
+}
+
+int getStatusCode(String& response) {
+  String code = response.substring(9, 12);
+  return code.toInt();
+}
+
+String getResponseBody(String& response) {
+  int split =
+  response.indexOf("\r\n\r\n");
+  String body =
+  response.substring(split+4,
+  response.length());
+  body.trim();
+  //Serial.print("The desired position is: ");
+  //Serial.println(body);
+  return body;
+}
+
+#define MAX_VALUES 10  // Adjust based on expected number of values
+int route[MAX_VALUES]; // Array to store the parsed numbers
+int routeLength = 0;   // Number of elements in the array
+
+void parseRoute(String response) {
+  // Get the body part of the response (excluding headers)
+  String body = getResponseBody(response);
+  
+  // Convert String to char array for strtok()
+  char buffer[body.length() + 1]; 
+  body.toCharArray(buffer, body.length() + 1);
+
+  char* token = strtok(buffer, ",");  // Split at commas
+  routeLength = 0;
+
+  while (token != NULL && routeLength < MAX_VALUES) {
+    route[routeLength++] = atoi(token);  // Convert to int and store
+    token = strtok(NULL, ",");           // Get next number
+  }
+
+  // Print parsed values
+  Serial.print("Parsed route: ");
+  for (int i = 0; i < routeLength; i++) {
+    Serial.print(route[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
+}
+
+void sendGetRequest() {
+  if (!client.connect(server, port)) {
+    Serial.println("Error connecting to server");
+    return;
+  }
+  client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
+  client.println("Host: 3.250.38.184");  // Include Host header
+  //client.println("Connection: close");   // Ensure connection closes after response
+  client.println(); // Blank line to end headers
+
+  Serial.println("GET request sent");
+
+  String response = readResponse(); // Read server response
+  Serial.println("Response: " + response);
+
+  parseRoute(response);  // Convert response to array
+}
 
 // function to find the checkpoint with minimum distance value
 int minDistance(int dist[], bool sptSet[]) {
@@ -95,7 +214,7 @@ void processRoute(int graph[V][V], int route[], int routeLength) {
   int path[V];
   int pathIndex;
 
-  for (int i = 0; i < routeLength - 1; i++) {
+  for (int i = 0; i < routeLength; i++) {
     int src = route[i];
     int dest = route[i + 1];
 
@@ -232,6 +351,8 @@ void rightOutsideSensorCorrection() {
     analogWrite(motor2PWM, speed_right);
 }
 
+int initialStop = 1;
+
 // setup code executes once upon running the code
 void setup() {
   Serial.begin(9600);
@@ -244,8 +365,12 @@ void setup() {
   analogWrite(motor1PWM, 0);
   analogWrite(motor2PWM, 0);
 
-  /*processRoute(graph, route, routeLength);
-  for (int x = 0; x < routeLength - 1; x++) {
+  connectToWiFi();
+  connect();
+  sendGetRequest();
+
+  processRoute(graph, route, routeLength);
+  /*for (int x = 0; x < routeLength - 1; x++) {
       Serial.println(skippedCount[x]);
   }*/
 }
@@ -274,17 +399,66 @@ void loop() {
 
     // when all / any 4 sensors are on white
     if(AnalogValue[0] < thresholdLS && AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[4] < thresholdLS && AnalogValue[2] < thresholdLS || AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[4] < thresholdLS && AnalogValue[2] < thresholdLS || AnalogValue[0] < thresholdLS && AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[2] < thresholdLS) {
+        Serial.println("DETECTED");
+        
         // if no checkpoints are to be skipped before desired checkpoint
-        if (skippedCount[ii] == 0) {
+        if (skippedCount[skipIndex] == 0) {
           stop();
+
+          String postBody("position=");
+          postBody += position;
+
+          // send post request and headers
+          client.println("POST /api/arrived/etgf7354 HTTP/1.1");
+          client.println("Content-Type: application/x-www-form-urlencoded");
+          client.print("Content-Length: ");
+          client.println(postBody.length());
+          client.println();
+
+          // send post body
+          client.println(postBody);
+
+          int destination;
+          
+          // read response
+          String response = readResponse();
+          // get status code
+          int statusCode = getStatusCode(response);
+
+          if (statusCode == 200) {
+            // success, read body
+            String body = getResponseBody(response);
+            
+            // check if at final destination
+            if (body.equals("Finished")) {
+              destination = body.toInt();
+              while(true);
+            }
+            else {
+              int newPosition = body.toInt();
+              if (newPosition > 0){
+                position = newPosition;
+              }
+              else {
+                Serial.println("Invalid position");
+              }
+            }
+          }
           delay(1000);
+
+          Serial.print("The response is: ");
+          Serial.println(response);
+          Serial.print("Current Position: ");
+          Serial.println(postBody);
+
+          delay(100);
           straight();
 
-          if (ii <= routeLength - 1) {
-            ii++;
+          if (skipIndex <= routeLength - 1) {
+            skipIndex++;
           }
           else {
-            ii = 0;
+            skipIndex = 0;
           }
 
           delay(250);
@@ -304,10 +478,10 @@ void loop() {
             delay(250);            
           }
         }
-        
+
         // if skipping a checkpoint
         else {
-          skippedCount[ii]--;
+          skippedCount[skipIndex]--;
           straight();
           delay(250);
         }
