@@ -290,6 +290,21 @@ void loop() {
           delay(250);
         }
 
+        else if (skippedCount[skipIndex] == 1 && route[skipIndex + 1] == 1) {
+          if (route[skipIndex] == 0 || route[skipIndex] == 3) {
+            leftTurn();
+            skippedCount[skipIndex]--;  // decrement skipped count
+            straight();
+            delay(250);
+          }
+          else if (route[skipIndex] == 2 || route[skipIndex] == 4) {
+            rightTurn();
+            skippedCount[skipIndex]--;  // decrement skipped count
+            straight();
+            delay(250);            
+          }
+        }
+        
         // if skipping a checkpoint
         else {
           skippedCount[ii]--;
