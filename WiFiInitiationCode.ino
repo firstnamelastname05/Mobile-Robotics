@@ -80,12 +80,40 @@ String getResponseBody(String& response) {
   return body;
 }
 
+#define MAX_VALUES 10  // Adjust based on expected number of values
+int route[MAX_VALUES]; // Array to store the parsed numbers
+int routeLength = 0;   // Number of elements in the array
+
+void parseRoute(String response) {
+  // Get the body part of the response (excluding headers)
+  String body = getResponseBody(response);
+  
+  // Convert String to char array for strtok()
+  char buffer[body.length() + 1]; 
+  body.toCharArray(buffer, body.length() + 1);
+
+  char* token = strtok(buffer, ",");  // Split at commas
+  routeLength = 0;
+
+  while (token != NULL && routeLength < MAX_VALUES) {
+    route[routeLength++] = atoi(token);  // Convert to int and store
+    token = strtok(NULL, ",");           // Get next number
+  }
+
+  // Print parsed values
+  Serial.print("Parsed route: ");
+  for (int i = 0; i < routeLength; i++) {
+    Serial.print(route[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
+}
+
 void sendGetRequest() {
   if (!client.connect(server, port)) {
     Serial.println("Error connecting to server");
     return;
   }
-
   client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
   client.println("Host: 3.250.38.184");  // Include Host header
   //client.println("Connection: close");   // Ensure connection closes after response
@@ -95,6 +123,8 @@ void sendGetRequest() {
 
   String response = readResponse(); // Read server response
   Serial.println("Response: " + response);
+
+  parseRoute(response);  // Convert response to array
 }
 
 
@@ -103,7 +133,7 @@ void setup() {
   delay(1000);
   connectToWiFi();
   connect();
-  client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
+  //client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
   analogWrite(motor1PWM, 0);
   analogWrite(motor2PWM, 0);
   sendGetRequest();
