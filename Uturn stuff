@@ -1,0 +1,74 @@
+bool requiresUTurn[10]; // Array to mark if a U-turn is required
+
+void processRoute(int graph[V][V], int route[], int routeLength) {
+    int dist[V], parent[V];
+    int path[V];
+    int pathIndex;
+
+    for (int i = 0; i < routeLength - 1; i++) {  
+        int src = route[i];
+        int dest = route[i + 1];
+
+        // Run Dijkstra's algorithm from the current source
+        dijkstra(graph, src, parent, dist);
+
+        // Extract the shortest path from source to destination
+        pathIndex = 0;
+        extractPath(parent, dest, path, pathIndex);
+
+        // Determine if we need to skip checkpoints
+        skippedCount[i] = (pathIndex > 2) ? (pathIndex - 2) : 0;
+
+        // Check if the next move is a U-turn
+        if (graph[dest][src] > 0) {  // If there's a direct edge back to src
+            requiresUTurn[i] = true;  // Mark this index for a U-turn
+        } else {
+            requiresUTurn[i] = false;
+        }
+
+        // Debug output
+        Serial.print("From ");
+        Serial.print(src);
+        Serial.print(" to ");
+        Serial.print(dest);
+        Serial.print(" - Skipped: ");
+        Serial.print(skippedCount[i]);
+        Serial.print(" - U-turn needed: ");
+        Serial.println(requiresUTurn[i] ? "YES" : "NO");
+    }
+}
+
+
+
+
+
+void checkForUTurn(int currentIndex) {
+    if (requiresUTurn[currentIndex]) {  
+        Serial.println("U-turn detected! Executing reverse maneuver...");
+        stop();
+        delay(500);  // Short stop before U-turn
+        reverse();
+        delay(250);  // Allow repositioning after reverse
+    }
+}
+
+
+
+
+
+
+if (skippedCount[skipIndex] == 0) {
+    stop();
+    updateCloud();
+
+    // Check if a U-turn is needed before continuing
+    checkForUTurn(skipIndex);
+
+    straight();
+    if (skipIndex <= routeLength - 1) {
+        skipIndex++;
+    } else {
+        skipIndex = 0;
+    }
+    delay(250);
+}
