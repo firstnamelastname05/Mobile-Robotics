@@ -51,6 +51,8 @@ int firstStop = 1; // variable to stop at 0 as first checkpoint
 
 int finish = 0; // variable to state if mobot should stop at next detected object
 
+int firstReverse = 1;
+
 // server details
 char server[] = "3.250.38.184";
 int port = 8000;
@@ -483,7 +485,7 @@ void loop() {
           }
           else if (route[skipIndex] == 1) {
             straight();            
-          }
+          }      
 
           finish = 1;
           skippedCount[skipIndex]--;  // decrement skipped count
@@ -545,6 +547,13 @@ void loop() {
 
         else if ((route[skipIndex] == 1) && (route[skipIndex+1] == 3 || route[skipIndex+1] == 0)) {
           rightTurn();
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        else if (route[0] == 0 && route[1] == 4 && firstReverse == 1) {
+          reverse();
+          firstReverse = 0;
           straight();
           skippedCount[skipIndex]--;
         }
