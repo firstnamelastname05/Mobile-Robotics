@@ -1,0 +1,64 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define SCREEN_ADDRESS 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+unsigned long startMillis;
+int checkpoint = 0; // Example variable
+
+void displayTimeAndCheckpoint() {
+  unsigned long elapsedMillis = millis() - startMillis;
+
+  int milliseconds = elapsedMillis % 1000;  
+  int seconds = (elapsedMillis / 1000) % 60;
+  int minutes = (elapsedMillis / 60000) % 60;
+
+  display.clearDisplay();  // Clear before redrawing everything
+
+  // Display Time (Top Line)
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(10, 1);
+
+  if (minutes < 10) display.print("0");
+  display.print(minutes);
+  display.print(":");
+  
+  if (seconds < 10) display.print("0");
+  display.print(seconds);
+  display.print(":");
+
+  if (milliseconds < 100) display.print("0");
+  if (milliseconds < 10) display.print("0");
+  display.print(milliseconds);
+
+  // Display Checkpoint (Below Time)
+  display.setTextSize(2);
+  display.setCursor(1, 20); // Move cursor below time
+  display.print("Checkpoint     ");
+  display.print(checkpoint);
+
+  display.display();  // Only update display once at the end
+}
+
+void setup() {
+  Wire.begin(13, 14);  // Custom SDA & SCL pins
+  Serial.begin(9600);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println("SSD1306 allocation failed");
+    while (1);
+  }
+
+  display.clearDisplay();
+  startMillis = millis();
+}
+
+void loop() {
+  displayTimeAndCheckpoint();  // Display both time and checkpoint
+}
