@@ -309,7 +309,7 @@ void rightTurn() {
     if(AnalogValue[2] < thresholdLS) {
         // drive straight
         straight();
-        delay(125);
+        delay(75);
     }
 }
 
@@ -334,7 +334,7 @@ void leftTurn() {
     if(AnalogValue[2] < thresholdLS) {
         // drive straight
         straight();
-        delay(125);
+        delay(75);
     }
 }
 
