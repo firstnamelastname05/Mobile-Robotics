@@ -649,6 +649,11 @@ void loop() {
             straight();
           }
 
+          if (route[skipIndex] == 1 && route[skipIndex + 1] == 5 && currentDirection == -1) {
+            reverse();
+            straight();
+          }
+
             delay(250);
         }
 
@@ -748,7 +753,7 @@ void loop() {
     delay(10);
 
     // increase count when mobot close to obstruction/wall
-    if(distanceValue > 2250) {
+    if(distanceValue > 2150) {
         consecCount++;
     }
     // if consecutive readings aren't high enough reset count
@@ -834,7 +839,7 @@ void loop() {
       // when sensor returns to path
       if(AnalogValue[2] < thresholdLS) {
           straight();
-          delay(125);
+          delay(250);
       }
     }    
 }
