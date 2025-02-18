@@ -1,0 +1,43 @@
+void markObstacleOnGraph(int fromNode, int toNode) {
+    graph[fromNode][toNode] = INF;  // Mark the edge as impassable
+    graph[toNode][fromNode] = INF;
+
+    Serial.print("Obstacle detected between nodes: ");
+    Serial.print(fromNode);
+    Serial.print(" and ");
+    Serial.println(toNode);
+}
+
+
+
+void checkObstacle(int currentNode, int previousNode) {
+    int distance = getDistance();
+
+    if (distance < OBSTACLE_THRESHOLD) {  // If obstacle detected
+        Serial.println("Obstacle detected! Reversing...");
+        obstacleDetected = true;
+        
+        markObstacleOnGraph(previousNode, currentNode); // Block the path
+        reverseCar();  // Execute reverse function
+
+        Serial.println("Returning to previous checkpoint...");
+        goToCheckpoint(previousCheckpoint); // Move back to previous checkpoint
+
+        Serial.println("Updating shortest route...");
+        runDijkstra();  // Recalculate shortest path
+    }
+}
+
+
+
+void moveCar() {
+    for (int i = 0; i < pathLength - 1; i++) {  // Go through path
+        previousCheckpoint = path[i]; // Store last checkpoint
+        int nextNode = path[i + 1]; // Get next node
+
+        driveToNode(nextNode); // Move to the next node
+
+        checkObstacle(nextNode, previousCheckpoint); // Check for obstacles
+        if (obstacleDetected) break; // Stop movement if obstacle found
+    }
+}
