@@ -1,0 +1,854 @@
+#define V 8 // define number of checkpoints/junctions on the map
+
+// header file for melody note names
+#include "pitches.h"
+#include <WiFi.h> // header file for wifi
+
+// notes in the melody:
+int melody[] = {
+  NOTE_C4, NOTE_G3
+};
+
+// note durations: 4 = quarter note, 8 = eighth note, etc.:
+int noteDurations[] = {
+  4, 4
+};
+
+// wi-fi details
+char ssid[] = "iot";
+char password[] = "militarists72disapproval";
+WiFiClient client;
+
+// read buffer size for HTTP response
+#define BUFSIZE 512
+
+// sensor analog values & ESP pin assignments
+int AnalogValue[5] = {0,0,0,0,0};
+int AnalogPin[5] = {4,5,6,7,15};
+
+// left motor pin assignments
+int motor1PWM = 37;
+int motor1Phase = 38;
+
+// right motor pin assignments
+int motor2PWM = 39;
+int motor2Phase = 40;
+
+// distance sensor analog value & pin assignment 
+int distancePin = 16;
+int distanceValue = 0;
+
+// motor speed variables
+int speed_left = 175;
+int speed_right = 175;
+
+// check for count of distance sensor readings
+int targetCount = 5;
+int consecCount = 0;
+
+// array of no. of checkpoints to skip between checkpoints in route array
+int skippedCount[10];
+
+// variable for iterating through skippedCount array
+int skipIndex = 0;
+
+// set line following sensors threshold value
+int thresholdLS = 750;
+
+#define MAX_VALUES 10  // variable for max route size
+int route[MAX_VALUES]; // array to store the full route
+int routeLength = 0;   // number of elements in the array
+
+int firstStop = 1; // variable to stop at 0 as first checkpoint
+int finish = 0; // variable to state if mobot should stop at next detected object
+int firstReverse = 1;
+int currentDirection = 1;
+int activateSensors = 1;
+int node1 = 0;
+int node2 = 0;
+
+// server details
+char server[] = "3.250.38.184";
+int port = 8000;
+int position = 0;
+
+// set distances between checkpoints on the map
+int graph[V][V] = {
+  {0, 0, 0, 0, 7, 0, 0, 8},
+  {0, 0, 0, 0, 0, 0, 2, 5},
+  {0, 0, 0, 7, 0, 0, 0, 8},
+  {0, 0, 7, 0, 0, 0, 10, 0},
+  {7, 0, 0, 0, 0, 0, 10, 0},
+  {0, 0, 0, 0, 0, 0, 10, 0},
+  {0, 2, 0, 10, 10, 10, 0, 0},
+  {8, 5, 8, 0, 0, 0, 0, 0},
+};
+
+int totalDistances[V][V] = {
+  {0, 13, 16, 23, 7, 25, 15, 8},
+  {13, 0, 13, 12, 12, 12, 2, 5},
+  {16, 13, 0, 7, 23, 25, 15, 8},
+  {23, 12, 7, 0, 20, 20, 10, 15},
+  {7, 12, 23, 20, 0, 20, 10, 15},
+  {25, 12, 25, 20, 20, 0, 10, 17},
+  {15, 2, 15, 10, 10, 10, 0, 7},
+  {8, 5, 8, 15, 15, 17, 7, 0},
+};
+
+// function to connect to wifi and return IP address
+void connectToWiFi() {
+  Serial.print("Connecting to network: ");
+  Serial.print(ssid);
+  Serial.flush();
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    Serial.flush();
+    delay(300);
+  }
+  Serial.println("Connected");
+  Serial.print("Obtaining IP address");
+  Serial.flush();
+
+  while (WiFi.localIP() == INADDR_NONE) {
+    Serial.print(".");
+    Serial.flush();
+    delay(300);
+  }
+  Serial.println();
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+// function to connect to the test server
+bool connect(){
+  if(!client.connect(server, port)){
+    Serial.println("error connecting to server");
+    return false;
+  }
+  return true;
+}
+
+// function to read the response from the server
+String readResponse() {
+  char buffer[BUFSIZE];
+  memset(buffer, 0, BUFSIZE);
+  client.readBytes(buffer, BUFSIZE);
+  String response(buffer);
+  return response;
+}
+
+// function to get the status code of the response from the server
+int getStatusCode(String& response) {
+  String code = response.substring(9, 12);
+  return code.toInt();
+}
+
+// function to get and format the response body
+String getResponseBody(String& response) {
+  int split =
+  response.indexOf("\r\n\r\n");
+  String body =
+  response.substring(split+4,
+  response.length());
+  body.trim();
+  //Serial.print("The desired position is: ");
+  //Serial.println(body);
+  return body;
+}
+
+// show and use the numbers of the route specified on the server
+void parseRoute(String response) {
+  // Get the body part of the response (excluding headers)
+  String body = getResponseBody(response);
+  
+  // Convert String to char array for strtok()
+  char buffer[body.length() + 1]; 
+  body.toCharArray(buffer, body.length() + 1);
+
+  char* token = strtok(buffer, ",");  // Split at commas
+  routeLength = 0;
+
+  while (token != NULL && routeLength < MAX_VALUES) {
+    route[routeLength++] = atoi(token);  // Convert to int and store
+    token = strtok(NULL, ",");           // Get next number
+  }
+
+  // Print parsed values
+  Serial.print("Route: ");
+  for (int i = 0; i < routeLength; i++) {
+    Serial.print(route[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
+}
+
+// function to get route from the server
+void sendGetRequest() {
+  if (!client.connect(server, port)) {
+    Serial.println("Error connecting to server");
+    return;
+  }
+  client.println("GET /api/getRoute/etgf7354 HTTP/1.1");
+  client.println("Host: 3.250.38.184");  // Include Host header
+  //client.println("Connection: close");   // Ensure connection closes after response
+  client.println(); // Blank line to end headers
+
+  Serial.println("GET request sent");
+
+  String response = readResponse(); // Read server response
+  Serial.println("Response: " + response);
+
+  parseRoute(response);  // Convert response to array
+}
+
+// function to find the checkpoint with minimum distance value
+int minDistance(int dist[], bool sptSet[]) {
+  int min = INT_MAX, min_index;
+  for (int v = 0; v < V; v++) {
+    if (!sptSet[v] && dist[v] <= min) {
+      min = dist[v];
+      min_index = v;
+    }
+  }
+  return min_index;
+}
+
+// function to extract the shortest path from source to a destination
+void extractPath(int parent[], int dest, int path[], int &pathIndex) {
+  if (dest == -1) return;
+  extractPath(parent, parent[dest], path, pathIndex);
+  path[pathIndex++] = dest;
+}
+
+// dijkstra's algorithm to find the shortest path from source
+void dijkstra(int graph[V][V], int src, int parent[], int dist[]) {
+  bool sptSet[V]; // sptSet[i] will be true if checkpoint i is included in shortest path tree
+
+  // initialize all distances as INFINITE and sptSet[] as false
+  for (int i = 0; i < V; i++) {
+    dist[i] = INT_MAX;
+    sptSet[i] = false;
+    parent[i] = -1; // no parent initially
+  }
+
+  // distance of source checkpoint from itself is always 0
+  dist[src] = 0;
+
+  // find shortest path for all checkpoints
+  for (int count = 0; count < V - 1; count++) {
+    // pick the minimum distance checkpoint from the set of checkpoints not yet processed
+    int u = minDistance(dist, sptSet);
+
+    // mark the picked checkpoint as processed
+    sptSet[u] = true;
+
+    // update dist value of the adjacent checkpoints of the picked checkpoint
+    for (int v = 0; v < V; v++) {
+      if (!sptSet[v] && graph[u][v] && dist[u] != INT_MAX && dist[u] + graph[u][v] < dist[v]) {
+        dist[v] = dist[u] + graph[u][v];
+        parent[v] = u; // set parent
+      }
+    }
+  }
+}
+
+// process the given route and determine the number of checkpoints skipped for each segment
+void processRoute(int graph[V][V], int route[], int routeLength) {
+  int dist[V], parent[V];
+  int path[V];
+  int pathIndex;
+
+  for (int i = 0; i < routeLength - 1; i++) {  // Start from index 0
+    int src = route[i];
+    int dest = route[i+1];
+
+    // Run Dijkstra's algorithm from the current source
+    dijkstra(graph, src, parent, dist);
+
+    // Extract the shortest path from source to destination
+    pathIndex = 0;
+    extractPath(parent, dest, path, pathIndex);
+
+    // Add number of checkpoints to skip to skippedCount array
+    skippedCount[i] = (pathIndex > 2) ? (pathIndex - 2) : 0;
+
+    // Debug output for skipped checkpoints
+    Serial.print("Skipped checkpoints from ");
+    Serial.print(src);
+    Serial.print(" to ");
+    Serial.print(dest);
+    Serial.print(": ");
+    Serial.println(skippedCount[i]);
+  }
+}
+
+// car goes forward in straight line
+void straight() {
+    speed_left = 175;
+    speed_right = 175;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// car performs 180 degree turn in place
+void reverse() {
+    analogWrite(motor2Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(550);
+    analogWrite(motor2Phase, 255);
+    currentDirection *= -1;
+}
+
+// car stops in place
+void stop() {
+    speed_left = 0;
+    speed_right = 0;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// car turns 90 degrees right in place
+void rightTurn() {
+    straight(); // stops car turning too early
+    delay(300);
+
+    stop(); // stop for set time
+    delay(250);
+
+    // rotate mobot 90 degrees right
+    analogWrite(motor1Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(250);
+    analogWrite(motor1Phase, 255);
+
+    // check when middle sensor returns to path
+    if(AnalogValue[2] < thresholdLS) {
+        // drive straight
+        straight();
+        delay(50);
+    }
+}
+
+// car turns 90 degrees left in place
+void leftTurn() {
+    straight(); // stops car turning too early
+    delay(300);
+
+    stop(); // stop for set time
+    delay(250);
+
+    // rotate mobot 90 degrees left
+    analogWrite(motor2Phase, 0);
+    speed_left = 255;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+    delay(250);
+    analogWrite(motor2Phase, 255);
+
+    // check when middle sensor returns to path
+    if(AnalogValue[2] < thresholdLS) {
+        // drive straight
+        straight();
+        delay(50);
+    }
+}
+
+// adjust each motor speed to turn left when inside sensor detects black
+void leftInsideSensorCorrection() {
+    speed_left = 175;
+    speed_right = 125;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn right when inside sensor detects black
+void rightInsideSensorCorrection() {
+    speed_left = 125;
+    speed_right = 175;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn left when outside sensor detects black
+void leftOutsideSensorCorrection() {
+    speed_left = 255;
+    speed_right = 50;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// adjust each motor speed to turn right when outside sensor detects black
+void rightOutsideSensorCorrection() {
+    speed_left = 50;
+    speed_right = 255;
+    analogWrite(motor1PWM, speed_left);
+    analogWrite(motor2PWM, speed_right);
+}
+
+// function to post to server and update position accordingly
+void updateCloud() {
+    String postBody("position=");
+    postBody += position;
+
+    // send post request and headers
+    client.println("POST /api/arrived/etgf7354 HTTP/1.1");
+    client.println("Content-Type: application/x-www-form-urlencoded");
+    client.print("Content-Length: ");
+    client.println(postBody.length());
+    client.println();
+
+    // send post body
+    client.println(postBody);
+
+    int destination;
+            
+    // read response
+    String response = readResponse();
+    // get status code
+    int statusCode = getStatusCode(response);
+
+    if (statusCode == 200) {
+      // success, read body
+      String body = getResponseBody(response);
+              
+      // check if at final destination
+      if (body.equals("Finished")) {
+        destination = body.toInt();
+        while(true);
+      }
+      else {
+        int newPosition = body.toInt();
+        if (newPosition >= 0){
+          position = newPosition;
+        }
+        else {
+          Serial.println("Invalid position");
+        }
+      }
+    }
+    delay(500);
+
+    Serial.print("The response is: ");
+    Serial.println(response);
+    Serial.print("Current Position: ");
+    Serial.println(postBody);
+
+    delay(100);
+}
+
+void playMelody() {
+    // iterate over the notes of the melody:
+    for (int thisNote = 0; thisNote < 2; thisNote++) {
+
+        // to calculate the note duration, take one second divided by the note type.
+        //e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc.
+        int noteDuration = 1000 / noteDurations[thisNote];
+        tone(8, melody[thisNote], noteDuration);
+
+        // to distinguish the notes, set a minimum time between them.
+        // the note's duration + 30% seems to work well:
+        int pauseBetweenNotes = noteDuration * 1.30;
+        delay(pauseBetweenNotes);
+        // stop the tone playing:
+        noTone(8);
+    } 
+}
+
+// setup code executes once upon running the code
+void setup() {
+    Serial.begin(9600);
+
+    // set motor turn directions to move forwards
+    analogWrite(motor1Phase, 255);
+    analogWrite(motor2Phase, 255);
+
+    // stop motors upon startup
+    analogWrite(motor1PWM, 0);
+    analogWrite(motor2PWM, 0);
+
+    connectToWiFi();
+    connect();
+    sendGetRequest();
+
+    updateCloud();
+
+    processRoute(graph, route, routeLength);
+    /*for (int x = 0; x < routeLength - 1; x++) {
+        Serial.println(skippedCount[x]);
+    }*/
+}
+
+// loop function executes repeatedly
+void loop() {
+    // cycle through sensor values for alignment detection
+    int i;
+    for (i=0;i<5;i++)
+    {
+        
+        if (activateSensors == 1) {
+          
+          AnalogValue[i]=analogRead(AnalogPin[i]);
+          /*Serial.print(AnalogValue[i]); // This prints the actual analog reading from the sensors
+          Serial.print("\t"); //tab over on screen
+          if(i==4)
+          {
+              Serial.println(""); //carriage return
+              delay(600); // display new set of readings every 600mS
+          }*/
+
+        }
+    }
+
+    // reset speed to default if inside & outside sensors are on black
+    if(AnalogValue[0] > thresholdLS && AnalogValue[1] > thresholdLS && AnalogValue[3] > thresholdLS && AnalogValue[4] > thresholdLS) {
+      straight();
+    }
+
+    // when all / any 4 sensors are on white
+    if(AnalogValue[0] < thresholdLS && AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[4] < thresholdLS && AnalogValue[2] < thresholdLS 
+        || AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[4] < thresholdLS && AnalogValue[2] < thresholdLS 
+        || AnalogValue[0] < thresholdLS && AnalogValue[1] < thresholdLS && AnalogValue[3] < thresholdLS && AnalogValue[2] < thresholdLS) {
+        Serial.println("DETECTED");
+
+        if (firstStop == 1) {
+          firstStop = 0;
+          skippedCount[0]++;
+          stop();
+          delay(1000);
+          straight();
+        }
+
+        else if (route[skipIndex + 1] == 5 && route[skipIndex] == 0 && skippedCount[skipIndex] == 2 && currentDirection == -1) {
+          skippedCount[skipIndex]--;
+          leftTurn();
+          
+          finish = 1;
+          activateSensors = 0;
+          for (int num = 0; num < 5; num++) {
+              AnalogValue[num] = 1000;
+          }
+          skippedCount[skipIndex]--;  // decrement skipped count
+          straight();
+          delay(500);
+        }
+
+        else if (route[skipIndex + 1] == 5 && skippedCount[skipIndex] == 1) {
+          if (route[skipIndex] == 4 && currentDirection == -1) {
+            leftTurn();
+          }
+          else if (route[skipIndex] == 3 && currentDirection == 1) {
+            rightTurn();           
+          }
+          else if (route[skipIndex] == 1 && currentDirection == 1) {
+            straight();            
+          }          
+
+          finish = 1;
+          activateSensors = 0;
+          for (int num = 0; num < 5; num++) {
+              AnalogValue[num] = 1000;
+          }
+          skippedCount[skipIndex]--;  // decrement skipped count
+          straight();
+          delay(500);
+        }
+
+        else if ((route[skipIndex + 1] == 5) && (skippedCount[skipIndex] == 3) && (route[skipIndex] == 2) && currentDirection == -1) {
+            rightTurn();
+            straight();
+            skippedCount[skipIndex]--;  // decrement skipped count
+        }
+
+        else if ((route[skipIndex + 1] == 5) && (skippedCount[skipIndex] == 3) && (route[skipIndex] == 0) && currentDirection == 1) {
+            leftTurn();
+            straight();
+            skippedCount[skipIndex]--;  // decrement skipped count
+        }
+
+        if (route[0] == 0 && route[1] == 4 && firstReverse == 1) {
+          reverse();
+          firstReverse = 0;
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        // if no checkpoints are to be skipped before desired checkpoint
+        else if (skippedCount[skipIndex] == 0) {
+          stop();
+          updateCloud();
+          straight();
+
+          if (skipIndex <= routeLength - 1) {
+            skipIndex++;
+          }
+          else {
+            skipIndex = 0;
+          }
+
+          if (route[skipIndex] == 1 && (route[skipIndex + 1] == 3 || route[skipIndex + 1] == 0)) {
+            currentDirection*= -1;
+          }
+
+          if (route[skipIndex] == 2 && route[skipIndex + 1] == 1 && currentDirection == 1) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex] == 0 && route[skipIndex + 1] == 1 && currentDirection == -1) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex - 1] == route[skipIndex + 1]) {
+            reverse();
+            straight();
+          }
+
+          if ((route[skipIndex - 1] == 3 || route[skipIndex - 1] == 4) && (route[skipIndex] == 1) && (route[skipIndex + 1] == 3 || route[skipIndex + 1] == 4 || route[skipIndex + 1] == 5)) {
+            reverse();
+            straight();
+          }
+
+          if ((route[skipIndex - 1] == 2 || route[skipIndex - 1] == 0) && (route[skipIndex] == 1) && (route[skipIndex + 1] == 2 || route[skipIndex + 1] == 0)) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex] == 2 && route[skipIndex + 1] == 5 && currentDirection == 1) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex] == 0 && route[skipIndex + 1] == 5 && currentDirection == -1) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex] == 4 && route[skipIndex + 1] == 5 && currentDirection == 1) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex] == 3 && route[skipIndex + 1] == 5 && currentDirection == -1) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex + 1] == 1 && route[skipIndex] == 4 && currentDirection == 1) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex + 1] == 1 && route[skipIndex] == 3 && currentDirection == -1) {
+            reverse();
+            straight();
+          }
+
+          if ((route[skipIndex] == 2 && route[skipIndex + 1] == 4 && currentDirection == 1) || (route[skipIndex] == 4 && route[skipIndex + 1] == 2 && currentDirection == -1)) {
+            reverse();
+            straight();
+          }
+
+          if ((route[skipIndex] == 0 && route[skipIndex + 1] == 3 && currentDirection == -1) || (route[skipIndex] == 3 && route[skipIndex + 1] == 0 && currentDirection == 1)) {
+            reverse();
+            straight();
+          }
+
+          if (route[skipIndex] == 1 && route[skipIndex + 1] == 5 && currentDirection == -1) {
+            reverse();
+            straight();
+          }
+
+            delay(250);
+        }
+
+        else if ((skippedCount[skipIndex] == 1) && (route[skipIndex + 1] == 1) && (route[skipIndex] == 0 || route[skipIndex] == 3) && (currentDirection == 1)) {
+            leftTurn();
+            skippedCount[skipIndex]--;  // decrement skipped count
+            straight();
+            delay(250);
+        }
+        
+        else if ((skippedCount[skipIndex] == 1) && (route[skipIndex + 1] == 1) && (route[skipIndex] == 2 || route[skipIndex] == 4) && (currentDirection == -1)) {
+            rightTurn();
+            skippedCount[skipIndex]--;  // decrement skipped count
+            straight();
+            delay(250);            
+        }
+
+        else if ((route[skipIndex] == 1) && (route[skipIndex+1] == 2 || route[skipIndex+1] == 4)) {
+          leftTurn();
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        else if ((route[skipIndex] == 1) && (route[skipIndex+1] == 3 || route[skipIndex+1] == 0)) {
+          rightTurn();
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        else if (((route[skipIndex] == 2 && route[skipIndex + 1] == 3) || ((route[skipIndex] == 4 && route[skipIndex + 1] == 0))) && (skippedCount[skipIndex] == 3 || skippedCount[skipIndex] == 1)) {
+          rightTurn();
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        else if (((route[skipIndex] == 3 && route[skipIndex + 1] == 2) || ((route[skipIndex] == 0 && route[skipIndex + 1] == 4))) && (skippedCount[skipIndex] == 3 || skippedCount[skipIndex] == 1)) {
+          leftTurn();
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 2 && currentDirection == -1 && skippedCount[skipIndex] == 3) {
+              rightTurn();
+              straight();
+              currentDirection = 1;
+              skippedCount[skipIndex]--;
+        }
+        
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 2 && currentDirection == 1 && skippedCount[skipIndex] == 1) {
+              leftTurn();
+              straight();
+              skippedCount[skipIndex]--;
+        }
+
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 1 && currentDirection == -1 && skippedCount[skipIndex] == 1) {
+              rightTurn();
+              straight();
+              skippedCount[skipIndex]--;
+        }
+
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 5 && currentDirection == -1 && skippedCount[skipIndex] == 1) {
+              leftTurn();
+              straight();
+              skippedCount[skipIndex]--;
+        }
+
+        // if skipping a checkpoint
+        else {
+          skippedCount[skipIndex]--;
+          straight();
+          delay(250);
+        }
+    }
+
+    // inside sensors speed change
+    if(AnalogValue[1] < thresholdLS)
+    {
+        leftInsideSensorCorrection();
+    }
+    if(AnalogValue[3] < thresholdLS)
+    {
+        rightInsideSensorCorrection();
+    }
+
+    // outside sensors speed change
+    if(AnalogValue[0] < thresholdLS)
+    {
+        leftOutsideSensorCorrection();
+    }
+    if(AnalogValue[4] < thresholdLS)
+    {
+        rightOutsideSensorCorrection();
+    }
+
+    // read analog values of distance sensor
+    distanceValue = analogRead(distancePin);
+    delay(10);
+
+    // increase count when mobot close to obstruction/wall
+    if(distanceValue > 2000) {
+        consecCount++;
+    }
+    // if consecutive readings aren't high enough reset count
+    else {
+        consecCount = 0;
+    }
+
+    // when targetCount number of consecutive readings are high
+    if(consecCount == targetCount) {
+      stop();
+
+      if (finish == 1) {
+        updateCloud();
+        client.stop();
+        while(true);
+      }
+      else if (finish == 0) {
+        // turn 180 degrees
+        reverse();
+
+        if ((route[skipIndex] == 2 && route[skipIndex + 1] == 3) || (route[skipIndex] == 3 && route[skipIndex + 1] == 2) || (route[skipIndex] == 0 && route[skipIndex + 1] == 4) || (route[skipIndex] == 4 && route[skipIndex + 1] == 0)) {
+          node1 = route[skipIndex];
+          node2 = route[skipIndex + 1];
+          graph[node1][node2] = 1000;
+          graph[node2][node1] = 1000;         
+        }
+        
+        if (route[skipIndex] == 0 && (route[skipIndex + 1] == 2 || route[skipIndex + 1] == 5 || route[skipIndex + 1] == 1 || route[skipIndex + 1] == 3) && skippedCount[skipIndex] == 1) {
+          graph[0][7] = 1000;
+          graph[7][0] = 1000;
+        }
+
+        if (route[skipIndex] == 0 && (route[skipIndex + 1] == 2 || route[skipIndex + 1] == 3) && skippedCount[skipIndex] == 0) {
+          graph[0][7] = 1000;
+          graph[7][0] = 1000;
+        }
+
+        if (route[skipIndex] == 2 && route[skipIndex + 1] == 0 && skippedCount[skipIndex] == 1) {
+          graph[2][7] = 1000;
+          graph[7][2] = 1000;
+        }
+        if (route[skipIndex] == 2 && route[skipIndex + 1] == 0 && skippedCount[skipIndex] == 0) {
+          graph[2][7] = 1000;
+          graph[7][2] = 1000;
+        }
+
+        if (route[skipIndex] == 3 && route[skipIndex + 1] == 4 && skippedCount[skipIndex] == 1) {
+          graph[3][6] = 1000;
+          graph[6][3] = 1000;
+        }
+        if (route[skipIndex] == 3 && route[skipIndex + 1] == 4 && skippedCount[skipIndex] == 0) {
+          graph[3][6] = 1000;
+          graph[6][3] = 1000;
+        }        
+
+        if (route[skipIndex] == 4 && route[skipIndex + 1] == 3 && skippedCount[skipIndex] == 1) {
+          graph[4][6] = 1000;
+          graph[6][4] = 1000;
+        }
+        if (route[skipIndex] == 4 && route[skipIndex + 1] == 3 && skippedCount[skipIndex] == 0) {
+          graph[4][6] = 1000;
+          graph[6][4] = 1000;
+        }     
+
+        if((route[skipIndex] == 3 || route[skipIndex] == 4) && route[skipIndex + 1] == 1 && skippedCount[skipIndex] == 0) {
+          graph[1][6] = 1000;
+          graph[6][1] = 1000;
+        } 
+
+        if((route[skipIndex] == 0 || route[skipIndex] == 2) && route[skipIndex + 1] == 1 && skippedCount[skipIndex] == 0) {
+          graph[1][7] = 1000;
+          graph[7][1] = 1000;
+        }     
+
+        processRoute(graph, route, routeLength); 
+        skippedCount[skipIndex]++;
+      }
+
+      // when sensor returns to path
+      if(AnalogValue[2] < thresholdLS) {
+          straight();
+          delay(250);
+      }
+    }    
+}
