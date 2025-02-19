@@ -14,9 +14,9 @@
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-unsigned long startMillis;
-unsigned long pausedTime = 0;
-bool isPaused = false;
+volatile unsigned long startMillis;
+volatile unsigned long pausedTime = 0;
+volatile int isPaused = 0;
 int checkpoint = 0;
 
 // notes in the melody:
@@ -79,6 +79,8 @@ int finish = 0; // variable to state if mobot should stop at next detected objec
 int firstReverse = 1;
 int currentDirection = 1;
 int activateSensors = 1;
+int node1 = 0;
+int node2 = 0;
 
 // server details
 char server[] = "3.250.38.184";
@@ -87,14 +89,25 @@ int position = 0;
 
 // set distances between checkpoints on the map
 int graph[V][V] = {
-  {0, 0, 0, 0, 8, 0, 0, 7},
+  {0, 0, 0, 0, 7, 0, 0, 8},
   {0, 0, 0, 0, 0, 0, 2, 5},
-  {0, 0, 0, 8, 0, 0, 0, 7},
-  {0, 0, 8, 0, 0, 0, 10, 0},
-  {8, 0, 0, 0, 0, 0, 10, 0},
+  {0, 0, 0, 7, 0, 0, 0, 8},
+  {0, 0, 7, 0, 0, 0, 10, 0},
+  {7, 0, 0, 0, 0, 0, 10, 0},
   {0, 0, 0, 0, 0, 0, 10, 0},
   {0, 2, 0, 10, 10, 10, 0, 0},
-  {7, 5, 7, 0, 0, 0, 0, 0},
+  {8, 5, 8, 0, 0, 0, 0, 0},
+};
+
+int totalDistances[V][V] = {
+  {0, 13, 16, 23, 7, 25, 15, 8},
+  {13, 0, 13, 12, 12, 12, 2, 5},
+  {16, 13, 0, 7, 23, 25, 15, 8},
+  {23, 12, 7, 0, 20, 20, 10, 15},
+  {7, 12, 23, 20, 0, 20, 10, 15},
+  {25, 12, 25, 20, 20, 0, 10, 17},
+  {15, 2, 15, 10, 10, 10, 0, 7},
+  {8, 5, 8, 15, 15, 17, 7, 0},
 };
 
 // function to connect to wifi and return IP address
@@ -180,7 +193,6 @@ void parseRoute(String response) {
   Serial.print("Route: ");
   for (int i = 0; i < routeLength; i++) {
     Serial.print(route[i]);
-    checkpoint = route[i];
     Serial.print(" ");
   }
   Serial.println();
@@ -465,52 +477,60 @@ void playMelody() {
     } 
 }
 
-int displayStuff(int check){
-  unsigned long elapsedMillis;
+TaskHandle_t displayTaskHandle;
 
-  //check if the timer should pause
-  if (checkpoint == 5 && !isPaused){
-    pausedTime = millis() - startMillis; //finished time
-    isPaused = true;
-  }
+void displayStuff(void *parameter){
+  int check = *((int *)parameter);
 
-  if (isPaused) {
-    elapsedMillis = pausedTime; //keep displaying the frozen time
+  for(;;){
+    unsigned long elapsedMillis;
+
+    //check if the timer should pause
+    if (checkpoint == 5 && isPaused == 0){
+      pausedTime = millis() - startMillis; //finished time
+      isPaused = 1;
+    }
+
+    if (isPaused == 1) {
+      elapsedMillis = pausedTime; //keep displaying the frozen time
+    } 
+    else{
+      elapsedMillis = millis() - startMillis;
+    }
+
+    int milliseconds = elapsedMillis % 1000;  
+    int seconds = (elapsedMillis / 1000) % 60;
+    int minutes = (elapsedMillis / 60000) % 60;
+
+    display.clearDisplay();
+
+    //Display time
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(10, 1);
+
+    if (minutes < 10) display.print("0");
+    display.print(minutes);
+    display.print(":");
+    
+    if (seconds < 10) display.print("0");
+    display.print(seconds);
+    display.print(":");
+
+    if (milliseconds < 100) display.print("0");
+    if (milliseconds < 10) display.print("0");
+    display.print(milliseconds);
+
+    //Display Checkpoint
+    display.setTextSize(2);
+    display.setCursor(1, 30);
+    display.print("Checkpoint:   ");
+    display.print(checkpoint);
+
+    display.display();
+
+    vTaskDelay(100 / portTICK_PERIOD_MS); // Delay to avoid hogging CPU
   } 
-  else{
-    elapsedMillis = millis() - startMillis;
-  }
-
-  int milliseconds = elapsedMillis % 1000;  
-  int seconds = (elapsedMillis / 1000) % 60;
-  int minutes = (elapsedMillis / 60000) % 60;
-
-  display.clearDisplay();
-
-  //Display time
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(10, 1);
-
-  if (minutes < 10) display.print("0");
-  display.print(minutes);
-  display.print(":");
-  
-  if (seconds < 10) display.print("0");
-  display.print(seconds);
-  display.print(":");
-
-  if (milliseconds < 100) display.print("0");
-  if (milliseconds < 10) display.print("0");
-  display.print(milliseconds);
-
-  //Display Checkpoint
-  display.setTextSize(2);
-  display.setCursor(10, 30);
-  display.print("CP: ");
-  display.print(check);
-
-  display.display();
 }
 
 // setup code executes once upon running the code
@@ -519,12 +539,23 @@ void setup() {
     Serial.begin(9600);
 
     if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)){
-      Serial.println("SSD1306 allocation failed")
-      while(1);
+      Serial.println("SSD1306 allocation failed");
+      while(true);
     }
 
     display.clearDisplay();
     startMillis = millis();
+
+    //static int check = 0;
+    xTaskCreatePinnedToCore(
+      displayStuff,
+      "DisplayTask",
+      10000,
+      &checkpoint,
+      1,
+      &displayTaskHandle,
+      0
+    );
 
     // set motor turn directions to move forwards
     analogWrite(motor1Phase, 255);
@@ -586,6 +617,20 @@ void loop() {
           straight();
         }
 
+        else if (route[skipIndex + 1] == 5 && route[skipIndex] == 0 && skippedCount[skipIndex] == 2 && currentDirection == -1) {
+          skippedCount[skipIndex]--;
+          leftTurn();
+          
+          finish = 1;
+          activateSensors = 0;
+          for (int num = 0; num < 5; num++) {
+              AnalogValue[num] = 1000;
+          }
+          skippedCount[skipIndex]--;  // decrement skipped count
+          straight();
+          delay(500);
+        }
+
         else if (route[skipIndex + 1] == 5 && skippedCount[skipIndex] == 1) {
           if (route[skipIndex] == 4 && currentDirection == -1) {
             leftTurn();
@@ -595,7 +640,7 @@ void loop() {
           }
           else if (route[skipIndex] == 1 && currentDirection == 1) {
             straight();            
-          }      
+          }          
 
           finish = 1;
           activateSensors = 0;
@@ -604,20 +649,19 @@ void loop() {
           }
           skippedCount[skipIndex]--;  // decrement skipped count
           straight();
-          delay(250);
+          delay(500);
         }
 
-        else if (route[skipIndex + 1] == 5 && skippedCount[skipIndex] == 3) {
-          if (route[skipIndex] == 2) {
+        else if ((route[skipIndex + 1] == 5) && (skippedCount[skipIndex] == 3) && (route[skipIndex] == 2) && currentDirection == -1) {
             rightTurn();
             straight();
             skippedCount[skipIndex]--;  // decrement skipped count
-          }
-          else if (route[skipIndex] == 0) {
+        }
+
+        else if ((route[skipIndex + 1] == 5) && (skippedCount[skipIndex] == 3) && (route[skipIndex] == 0) && currentDirection == 1) {
             leftTurn();
             straight();
             skippedCount[skipIndex]--;  // decrement skipped count
-          }
         }
 
         if (route[0] == 0 && route[1] == 4 && firstReverse == 1) {
@@ -635,6 +679,7 @@ void loop() {
 
           if (skipIndex <= routeLength - 1) {
             skipIndex++;
+            checkpoint = route[skipIndex];
           }
           else {
             skipIndex = 0;
@@ -709,22 +754,26 @@ void loop() {
             straight();
           }
 
+          if (route[skipIndex] == 1 && route[skipIndex + 1] == 5 && currentDirection == -1) {
+            reverse();
+            straight();
+          }
+
             delay(250);
         }
 
-        else if (skippedCount[skipIndex] == 1 && route[skipIndex + 1] == 1) {
-          if (route[skipIndex] == 0 || route[skipIndex] == 3) {
+        else if ((skippedCount[skipIndex] == 1) && (route[skipIndex + 1] == 1) && (route[skipIndex] == 0 || route[skipIndex] == 3) && (currentDirection == 1)) {
             leftTurn();
             skippedCount[skipIndex]--;  // decrement skipped count
             straight();
             delay(250);
-          }
-          else if (route[skipIndex] == 2 || route[skipIndex] == 4) {
+        }
+        
+        else if ((skippedCount[skipIndex] == 1) && (route[skipIndex + 1] == 1) && (route[skipIndex] == 2 || route[skipIndex] == 4) && (currentDirection == -1)) {
             rightTurn();
             skippedCount[skipIndex]--;  // decrement skipped count
             straight();
             delay(250);            
-          }
         }
 
         else if ((route[skipIndex] == 1) && (route[skipIndex+1] == 2 || route[skipIndex+1] == 4)) {
@@ -737,6 +786,43 @@ void loop() {
           rightTurn();
           straight();
           skippedCount[skipIndex]--;
+        }
+
+        else if (((route[skipIndex] == 2 && route[skipIndex + 1] == 3) || ((route[skipIndex] == 4 && route[skipIndex + 1] == 0))) && (skippedCount[skipIndex] == 3 || skippedCount[skipIndex] == 1)) {
+          rightTurn();
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        else if (((route[skipIndex] == 3 && route[skipIndex + 1] == 2) || ((route[skipIndex] == 0 && route[skipIndex + 1] == 4))) && (skippedCount[skipIndex] == 3 || skippedCount[skipIndex] == 1)) {
+          leftTurn();
+          straight();
+          skippedCount[skipIndex]--;
+        }
+
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 2 && currentDirection == -1 && skippedCount[skipIndex] == 3) {
+              rightTurn();
+              straight();
+              currentDirection = 1;
+              skippedCount[skipIndex]--;
+        }
+        
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 2 && currentDirection == 1 && skippedCount[skipIndex] == 1) {
+              leftTurn();
+              straight();
+              skippedCount[skipIndex]--;
+        }
+
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 1 && currentDirection == -1 && skippedCount[skipIndex] == 1) {
+              rightTurn();
+              straight();
+              skippedCount[skipIndex]--;
+        }
+
+        else if (route[skipIndex] == 0 && route[skipIndex + 1] == 5 && currentDirection == -1 && skippedCount[skipIndex] == 1) {
+              leftTurn();
+              straight();
+              skippedCount[skipIndex]--;
         }
 
         // if skipping a checkpoint
@@ -772,7 +858,7 @@ void loop() {
     delay(10);
 
     // increase count when mobot close to obstruction/wall
-    if(distanceValue > 2250) {
+    if(distanceValue > 2000) {
         consecCount++;
     }
     // if consecutive readings aren't high enough reset count
@@ -783,7 +869,6 @@ void loop() {
     // when targetCount number of consecutive readings are high
     if(consecCount == targetCount) {
       stop();
-      delay(250);
 
       if (finish == 1) {
         updateCloud();
@@ -793,13 +878,69 @@ void loop() {
       else if (finish == 0) {
         // turn 180 degrees
         reverse();
+
+        if ((route[skipIndex] == 2 && route[skipIndex + 1] == 3) || (route[skipIndex] == 3 && route[skipIndex + 1] == 2) || (route[skipIndex] == 0 && route[skipIndex + 1] == 4) || (route[skipIndex] == 4 && route[skipIndex + 1] == 0)) {
+          node1 = route[skipIndex];
+          node2 = route[skipIndex + 1];
+          graph[node1][node2] = 1000;
+          graph[node2][node1] = 1000;         
+        }
+        
+        if (route[skipIndex] == 0 && (route[skipIndex + 1] == 2 || route[skipIndex + 1] == 5 || route[skipIndex + 1] == 1 || route[skipIndex + 1] == 3) && skippedCount[skipIndex] == 1) {
+          graph[0][7] = 1000;
+          graph[7][0] = 1000;
+        }
+
+        if (route[skipIndex] == 0 && (route[skipIndex + 1] == 2 || route[skipIndex + 1] == 3) && skippedCount[skipIndex] == 0) {
+          graph[0][7] = 1000;
+          graph[7][0] = 1000;
+        }
+
+        if (route[skipIndex] == 2 && route[skipIndex + 1] == 0 && skippedCount[skipIndex] == 1) {
+          graph[2][7] = 1000;
+          graph[7][2] = 1000;
+        }
+        if (route[skipIndex] == 2 && route[skipIndex + 1] == 0 && skippedCount[skipIndex] == 0) {
+          graph[2][7] = 1000;
+          graph[7][2] = 1000;
+        }
+
+        if (route[skipIndex] == 3 && route[skipIndex + 1] == 4 && skippedCount[skipIndex] == 1) {
+          graph[3][6] = 1000;
+          graph[6][3] = 1000;
+        }
+        if (route[skipIndex] == 3 && route[skipIndex + 1] == 4 && skippedCount[skipIndex] == 0) {
+          graph[3][6] = 1000;
+          graph[6][3] = 1000;
+        }        
+
+        if (route[skipIndex] == 4 && route[skipIndex + 1] == 3 && skippedCount[skipIndex] == 1) {
+          graph[4][6] = 1000;
+          graph[6][4] = 1000;
+        }
+        if (route[skipIndex] == 4 && route[skipIndex + 1] == 3 && skippedCount[skipIndex] == 0) {
+          graph[4][6] = 1000;
+          graph[6][4] = 1000;
+        }     
+
+        if((route[skipIndex] == 3 || route[skipIndex] == 4) && route[skipIndex + 1] == 1 && skippedCount[skipIndex] == 0) {
+          graph[1][6] = 1000;
+          graph[6][1] = 1000;
+        } 
+
+        if((route[skipIndex] == 0 || route[skipIndex] == 2) && route[skipIndex + 1] == 1 && skippedCount[skipIndex] == 0) {
+          graph[1][7] = 1000;
+          graph[7][1] = 1000;
+        }     
+
+        processRoute(graph, route, routeLength); 
+        skippedCount[skipIndex]++;
       }
 
       // when sensor returns to path
       if(AnalogValue[2] < thresholdLS) {
           straight();
-          delay(125);
+          delay(250);
       }
-    } 
-  displayStuff(checkpoint);
+    }    
 }
